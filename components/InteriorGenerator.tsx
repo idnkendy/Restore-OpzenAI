@@ -57,12 +57,6 @@ const colorPaletteOptions = [
     { value: 'Tông màu pastel nhẹ nhàng', label: 'Pastel' },
 ];
 
-const SparklesIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-    </svg>
-);
-
 interface InteriorGeneratorProps {
   state: InteriorGeneratorState;
   onStateChange: (newState: Partial<InteriorGeneratorState>) => void;
@@ -78,7 +72,6 @@ const InteriorGenerator: React.FC<InteriorGeneratorProps> = ({ state, onStateCha
     } = state;
 
     const [previewImage, setPreviewImage] = useState<string | null>(null);
-    const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
     
     const updatePrompt = useCallback((type: 'style' | 'roomType' | 'lighting' | 'colorPalette', newValue: string, oldValue: string) => {
         const getPromptPart = (partType: string, value: string): string => {
@@ -148,23 +141,6 @@ const InteriorGenerator: React.FC<InteriorGeneratorProps> = ({ state, onStateCha
     
     const handleReferenceFileSelect = (fileData: FileData | null) => {
         onStateChange({ referenceImage: fileData });
-    };
-
-    const handleAutoPrompt = async () => {
-        if (!sourceImage) {
-            onStateChange({ error: 'Vui lòng tải ảnh lên trước khi tạo prompt tự động.' });
-            return;
-        }
-        setIsGeneratingPrompt(true);
-        onStateChange({ error: null });
-        try {
-            const generatedPrompt = await geminiService.generatePromptFromImageAndText(sourceImage, customPrompt);
-            onStateChange({ customPrompt: generatedPrompt });
-        } catch (err: any) {
-            onStateChange({ error: err.message });
-        } finally {
-            setIsGeneratingPrompt(false);
-        }
     };
 
     // Calculate cost based on resolution
@@ -366,14 +342,6 @@ const InteriorGenerator: React.FC<InteriorGeneratorProps> = ({ state, onStateCha
                                     onChange={(e) => onStateChange({ customPrompt: e.target.value })}
                                     disabled={isLoading}
                                 />
-                                <button
-                                    onClick={handleAutoPrompt}
-                                    disabled={!sourceImage || isLoading || isUpscaling || isGeneratingPrompt}
-                                    className="mt-2 w-full flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 dark:disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-semibold py-2 px-3 rounded-lg transition-colors text-sm"
-                                >
-                                    {isGeneratingPrompt ? <Spinner /> : <SparklesIcon />}
-                                    <span>{isGeneratingPrompt ? 'Đang tạo...' : 'Tạo tự động Prompt'}</span>
-                                </button>
                              </div>
                             
                             <div className="pt-2">

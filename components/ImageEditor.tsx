@@ -14,12 +14,6 @@ import ImagePreviewModal from './common/ImagePreviewModal';
 import MultiImageUpload from './common/MultiImageUpload';
 import ResolutionSelector from './common/ResolutionSelector';
 
-const SparklesIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-    </svg>
-);
-
 interface ImageEditorProps {
     state: ImageEditorState;
     onStateChange: (newState: Partial<ImageEditorState>) => void;
@@ -55,7 +49,6 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ state, onStateChange, userCre
     
     const [isMaskingModalOpen, setIsMaskingModalOpen] = useState<boolean>(false);
     const [previewImage, setPreviewImage] = useState<string | null>(null);
-    const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
     const [detectedAspectRatio, setDetectedAspectRatio] = useState<AspectRatio>('1:1');
 
 
@@ -76,23 +69,6 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ state, onStateChange, userCre
 
     const handleReferenceFilesChange = (files: FileData[]) => {
         onStateChange({ referenceImages: files });
-    };
-
-    const handleAutoPrompt = async () => {
-        if (!sourceImage) {
-            onStateChange({ error: 'Vui lòng tải ảnh lên trước khi tạo prompt tự động.' });
-            return;
-        }
-        setIsGeneratingPrompt(true);
-        onStateChange({ error: null });
-        try {
-            const generatedPrompt = await geminiService.generatePromptFromImageAndText(sourceImage, prompt);
-            onStateChange({ prompt: generatedPrompt });
-        } catch (err: any) {
-            onStateChange({ error: err.message });
-        } finally {
-            setIsGeneratingPrompt(false);
-        }
     };
 
     // Calculate cost based on resolution
@@ -277,14 +253,6 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ state, onStateChange, userCre
                             value={prompt}
                             onChange={(e) => onStateChange({ prompt: e.target.value })}
                         />
-                        <button
-                            onClick={handleAutoPrompt}
-                            disabled={!sourceImage || isLoading || isGeneratingPrompt}
-                            className="mt-2 w-full flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 dark:disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-semibold py-2 px-3 rounded-lg transition-colors text-sm"
-                        >
-                            {isGeneratingPrompt ? <Spinner /> : <SparklesIcon />}
-                            <span>{isGeneratingPrompt ? 'Đang tạo...' : 'Tạo tự động Prompt'}</span>
-                        </button>
                      </div>
                      
                      <div className="bg-main-bg/50 dark:bg-dark-bg/50 p-6 rounded-xl border border-border-color dark:border-gray-700">

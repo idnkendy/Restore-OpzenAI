@@ -66,12 +66,6 @@ const weatherOptions = [
     { value: 'sau một cơn mưa, có vũng nước và phản chiếu', label: 'Sau mưa' },
 ];
 
-const SparklesIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-    </svg>
-);
-
 interface ImageGeneratorProps {
   state: ImageGeneratorState;
   onStateChange: (newState: Partial<ImageGeneratorState>) => void;
@@ -88,7 +82,6 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ state, onStateChange, o
     } = state;
     
     const [previewImage, setPreviewImage] = useState<string | null>(null);
-    const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
     const [statusMessage, setStatusMessage] = useState<string | null>(null);
     const [queuePosition, setQueuePosition] = useState<number | null>(null);
     const [activeJobId, setActiveJobId] = useState<string | null>(null);
@@ -193,23 +186,6 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ state, onStateChange, o
 
     const handleReferenceFileSelect = (fileData: FileData | null) => {
         onStateChange({ referenceImage: fileData });
-    };
-
-    const handleAutoPrompt = async () => {
-        if (!sourceImage) {
-            onStateChange({ error: 'Vui lòng tải ảnh lên trước khi tạo prompt tự động.' });
-            return;
-        }
-        setIsGeneratingPrompt(true);
-        onStateChange({ error: null });
-        try {
-            const generatedPrompt = await geminiService.generatePromptFromImageAndText(sourceImage, customPrompt);
-            onStateChange({ customPrompt: generatedPrompt });
-        } catch (err: any) {
-            onStateChange({ error: err.message });
-        } finally {
-            setIsGeneratingPrompt(false);
-        }
     };
 
     // Calculate cost based on resolution
@@ -478,21 +454,12 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ state, onStateChange, o
                             <textarea
                                 id="custom-prompt-architectural"
                                 rows={4}
-                                className="w-full bg-surface dark:bg-gray-700/50 border border-border-color dark:border-gray-600 rounded-lg p-3 text-text-primary dark:text-gray-200 focus:ring-2 focus:ring-accent focus:border-accent focus:outline-none transition-all resize-none text-sm md:text-base pb-10"
+                                className="w-full bg-surface dark:bg-gray-700/50 border border-border-color dark:border-gray-600 rounded-lg p-3 text-text-primary dark:text-gray-200 focus:ring-2 focus:ring-accent focus:border-accent focus:outline-none transition-all resize-none text-sm md:text-base"
                                 placeholder="VD: Một ngôi nhà phố hiện đại, mặt tiền 5m, nhiều cây xanh, cửa kính lớn, ánh sáng tự nhiên..."
                                 value={customPrompt}
                                 onChange={(e) => onStateChange({ customPrompt: e.target.value })}
                                 disabled={isLoading}
                             />
-                            <button
-                                onClick={handleAutoPrompt}
-                                disabled={!sourceImage || isLoading || isUpscaling || isGeneratingPrompt}
-                                className="absolute bottom-2 right-2 p-2 text-xs bg-purple-600 hover:bg-purple-700 text-white rounded-md transition-colors flex items-center gap-1 disabled:bg-gray-500 disabled:cursor-not-allowed"
-                                title="Tạo prompt từ ảnh"
-                            >
-                                {isGeneratingPrompt ? <Spinner /> : <SparklesIcon />}
-                                <span className="hidden sm:inline">Auto Prompt</span>
-                            </button>
                         </div>
 
                         {/* Options Grid */}

@@ -24,12 +24,6 @@ const renovationSuggestions = [
     { label: 'Đưa mẫu công trình vào không gian', prompt: 'Đưa mẫu công trình ở ảnh tham chiếu và đưa vào vùng tô đỏ của ảnh thực tế.' },
 ];
 
-const SparklesIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-    </svg>
-);
-
 interface RenovationProps {
     state: RenovationState;
     onStateChange: (newState: Partial<RenovationState>) => void;
@@ -41,24 +35,6 @@ const Renovation: React.FC<RenovationProps> = ({ state, onStateChange, userCredi
     const { prompt, sourceImage, referenceImage, maskImage, isLoading, error, renovatedImages, numberOfImages, aspectRatio, resolution } = state;
     const [previewImage, setPreviewImage] = useState<string | null>(null);
     const [isMaskingModalOpen, setIsMaskingModalOpen] = useState<boolean>(false);
-    const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
-
-    const handleAutoPrompt = async () => {
-        if (!sourceImage) {
-            onStateChange({ error: 'Vui lòng tải ảnh lên trước khi tạo prompt tự động.' });
-            return;
-        }
-        setIsGeneratingPrompt(true);
-        onStateChange({ error: null });
-        try {
-            const generatedPrompt = await geminiService.generatePromptFromImageAndText(sourceImage, prompt);
-            onStateChange({ prompt: generatedPrompt });
-        } catch (err: any) {
-            onStateChange({ error: err.message });
-        } finally {
-            setIsGeneratingPrompt(false);
-        }
-    };
 
     // Calculate cost based on resolution
     const getCostPerImage = () => {
@@ -249,14 +225,6 @@ const Renovation: React.FC<RenovationProps> = ({ state, onStateChange, userCredi
                                     value={prompt}
                                     onChange={(e) => onStateChange({ prompt: e.target.value })}
                                 />
-                                <button
-                                    onClick={handleAutoPrompt}
-                                    disabled={!sourceImage || isLoading || isGeneratingPrompt}
-                                    className="mt-2 w-full flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 dark:disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-semibold py-2 px-3 rounded-lg transition-colors text-sm"
-                                >
-                                    {isGeneratingPrompt ? <Spinner /> : <SparklesIcon />}
-                                    <span>{isGeneratingPrompt ? 'Đang tạo...' : 'Tạo tự động Prompt'}</span>
-                                </button>
                                  <div className="mt-3">
                                      <label htmlFor="renovation-suggestions" className="block text-sm font-medium text-text-secondary dark:text-gray-400 mb-2">Thêm gợi ý nhanh</label>
                                      <div className="relative">
