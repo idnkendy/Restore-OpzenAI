@@ -1,9 +1,11 @@
-
 import React, { useState } from 'react';
 import { FileData, Tool, ImageResolution, AspectRatio } from '../types';
 import { UpscaleState } from '../state/toolState';
 import * as geminiService from '../services/geminiService';
 import * as historyService from '../services/historyService';
+import * as jobService from '../services/jobService';
+import { refundCredits } from '../services/paymentService';
+import { supabase } from '../services/supabaseClient';
 import Spinner from './Spinner';
 import ImageUpload from './common/ImageUpload';
 import ImageComparator from './ImageComparator';
@@ -78,28 +80,52 @@ const Upscale: React.FC<UpscaleProps> = ({ state, onStateChange, userCredits = 0
         }
         onStateChange({ isLoading: true, error: null, upscaledImages: [] });
 
+        let jobId: string | null = null;
+        let logId: string | null = null;
+
         try {
              if (onDeductCredits) {
-                await onDeductCredits(cost, `Upscale ảnh (${numberOfImages} ảnh) - ${resolution}`);
+                logId = await onDeductCredits(cost, `Upscale ảnh (${numberOfImages} ảnh) - ${resolution}`);
             }
+
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user && logId) {
+                 jobId = await jobService.createJob({
+                    user_id: user.id,
+                    tool_id: Tool.Upscale,
+                    prompt: upscalePrompt, // Fixed prompt for upscale
+                    cost: cost,
+                    usage_log_id: logId
+                });
+            }
+
+            if (logId && !jobId) {
+                throw new Error("Không thể khởi tạo tác vụ (Job Creation Failed). Đang hoàn tiền...");
+            }
+
+            if (jobId) await jobService.updateJobStatus(jobId, 'processing');
 
             let results: { imageUrl: string }[] = [];
 
             // High Quality (Pro) Logic
             if (resolution === '1K' || resolution === '2K' || resolution === '4K') {
                 const promises = Array.from({ length: numberOfImages }).map(async () => {
-                    const images = await geminiService.generateHighQualityImage(upscalePrompt, detectedAspectRatio, resolution, sourceImage || undefined);
+                    const images = await geminiService.generateHighQualityImage(upscalePrompt, detectedAspectRatio, resolution, sourceImage || undefined, jobId || undefined);
                     return { imageUrl: images[0] };
                 });
                 results = await Promise.all(promises);
             } 
             // Standard (Flash) Logic
             else {
-                results = await geminiService.editImage(upscalePrompt, sourceImage, numberOfImages);
+                results = await geminiService.editImage(upscalePrompt, sourceImage, numberOfImages, jobId || undefined);
             }
 
             const imageUrls = results.map(r => r.imageUrl);
             onStateChange({ upscaledImages: imageUrls });
+
+            if (jobId && imageUrls.length > 0) {
+                await jobService.updateJobStatus(jobId, 'completed', imageUrls[0]);
+            }
 
             imageUrls.forEach(url => {
                 historyService.addToHistory({
@@ -110,7 +136,21 @@ const Upscale: React.FC<UpscaleProps> = ({ state, onStateChange, userCredits = 0
                 });
             });
         } catch (err: any) {
-            onStateChange({ error: err.message || 'Đã xảy ra lỗi không mong muốn.' });
+            // CLEAN ERROR MESSAGE
+            let userErrorMessage = err.message || 'Đã xảy ra lỗi không mong muốn.';
+            if (!userErrorMessage.includes('thử lại') && !userErrorMessage.includes('credits')) {
+                userErrorMessage += ". Vui lòng thử lại sau.";
+            }
+            onStateChange({ error: userErrorMessage });
+
+            if (jobId) {
+                await jobService.updateJobStatus(jobId, 'failed', undefined, err.message);
+            }
+            
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user && logId) {
+               await refundCredits(user.id, cost, `Hoàn tiền: Lỗi khi upscale ảnh (${err.message})`);
+            }
         } finally {
             onStateChange({ isLoading: false });
         }

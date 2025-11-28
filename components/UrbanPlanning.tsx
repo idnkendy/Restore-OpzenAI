@@ -2,6 +2,9 @@
 import React, { useState, useCallback } from 'react';
 import * as geminiService from '../services/geminiService';
 import * as historyService from '../services/historyService';
+import * as jobService from '../services/jobService';
+import { refundCredits } from '../services/paymentService';
+import { supabase } from '../services/supabaseClient';
 import { FileData, Tool, AspectRatio, ImageResolution } from '../types';
 import { UrbanPlanningState } from '../state/toolState';
 import Spinner from './Spinner';
@@ -145,10 +148,30 @@ const UrbanPlanning: React.FC<UrbanPlanningProps> = ({ state, onStateChange, onS
         }
         onStateChange({ isLoading: true, error: null, resultImages: [], upscaledImage: null });
         
+        let jobId: string | null = null;
+        let logId: string | null = null;
+
         try {
              if (onDeductCredits) {
-                await onDeductCredits(cost, `Render quy hoạch (${numberOfImages} ảnh) - ${resolution || 'Standard'}`);
+                logId = await onDeductCredits(cost, `Render quy hoạch (${numberOfImages} ảnh) - ${resolution || 'Standard'}`);
             }
+
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user && logId) {
+                 jobId = await jobService.createJob({
+                    user_id: user.id,
+                    tool_id: Tool.UrbanPlanning,
+                    prompt: customPrompt,
+                    cost: cost,
+                    usage_log_id: logId
+                });
+            }
+
+            if (logId && !jobId) {
+                throw new Error("Không thể khởi tạo tác vụ (Job Creation Failed). Đang hoàn tiền...");
+            }
+
+            if (jobId) await jobService.updateJobStatus(jobId, 'processing');
 
             let imageUrls: string[] = [];
             
@@ -166,18 +189,22 @@ const UrbanPlanning: React.FC<UrbanPlanningProps> = ({ state, onStateChange, onS
             // High Quality Logic
             if (resolution === '1K' || resolution === '2K' || resolution === '4K') {
                 const promises = Array.from({ length: numberOfImages }).map(async () => {
-                    const images = await geminiService.generateHighQualityImage(promptForService, aspectRatio, resolution, sourceImage || undefined);
+                    const images = await geminiService.generateHighQualityImage(promptForService, aspectRatio, resolution, sourceImage || undefined, jobId || undefined);
                     return images[0];
                 });
                 imageUrls = await Promise.all(promises);
             } 
             // Standard Logic
             else {
-                imageUrls = await geminiService.generateStandardImage(promptForService, aspectRatio, numberOfImages, sourceImage || undefined);
+                imageUrls = await geminiService.generateStandardImage(promptForService, aspectRatio, numberOfImages, sourceImage || undefined, jobId || undefined);
             }
             
             onStateChange({ resultImages: imageUrls });
             
+            if (jobId && imageUrls.length > 0) {
+                await jobService.updateJobStatus(jobId, 'completed', imageUrls[0]);
+            }
+
             imageUrls.forEach(url => {
                 historyService.addToHistory({
                     tool: Tool.UrbanPlanning,
@@ -188,7 +215,17 @@ const UrbanPlanning: React.FC<UrbanPlanningProps> = ({ state, onStateChange, onS
             });
 
         } catch (err: any) {
-            onStateChange({ error: err.message || 'Đã xảy ra lỗi không mong muốn.' });
+            // SIMPLIFIED ERROR DISPLAY
+            onStateChange({ error: err.message });
+
+            if (jobId) {
+                await jobService.updateJobStatus(jobId, 'failed', undefined, err.message);
+            }
+            
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user && logId) {
+               await refundCredits(user.id, cost, `Hoàn tiền: Lỗi khi render quy hoạch (${err.message})`);
+            }
         } finally {
             onStateChange({ isLoading: false });
         }

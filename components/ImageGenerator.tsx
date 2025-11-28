@@ -270,6 +270,11 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ state, onStateChange, o
                 });
                 setActiveJobId(jobId); // Set for queue polling
             }
+            
+            // Ensure Job is created before proceeding (critical check)
+            if (logId && !jobId) {
+                throw new Error("Không thể khởi tạo tác vụ (Job Creation Failed). Đang hoàn tiền...");
+            }
 
             // 3. Smart Retry Logic
             let attempts = 0;
@@ -329,25 +334,16 @@ const ImageGenerator: React.FC<ImageGeneratorProps> = ({ state, onStateChange, o
         } catch (err: any) {
             console.error("Generation Error:", err);
             
-            // GENERIC ERROR MESSAGE FOR USERS
-            let userErrorMessage = 'Đã xảy ra lỗi trong quá trình xử lý. Vui lòng thử lại sau.';
-            
-            // Allow specific known errors to pass through if safe
-            if (err.message.includes('không đủ credits') || err.message.includes('Credits')) {
-                userErrorMessage = err.message;
-            } else if (err.message.includes('Hệ thống quá tải')) {
-                userErrorMessage = err.message;
-            } else if (err.message.includes('Lỗi kết nối')) {
-                userErrorMessage = err.message;
-            }
-
-            onStateChange({ error: userErrorMessage });
+            // SIMPLIFIED ERROR DISPLAY: Just use the sanitized message from service
+            onStateChange({ error: err.message });
             
             if (jobId) {
                 await jobService.updateJobStatus(jobId, 'failed', undefined, err.message);
             }
+            
+            // Refund only if money was deducted (logId exists)
              const { data: { user } } = await supabase.auth.getUser();
-             if (user) {
+             if (user && logId) {
                 await refundCredits(user.id, cost, `Hoàn tiền: Lỗi khi render kiến trúc (${err.message})`);
              }
 

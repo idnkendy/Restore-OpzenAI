@@ -95,7 +95,12 @@ const PromptSuggester: React.FC<PromptSuggesterProps> = ({ state, onStateChange,
             const result = await geminiService.generatePromptSuggestions(sourceImage, selectedSubject, numberOfSuggestions, customInstruction);
             onStateChange({ suggestions: result });
         } catch (err: any) {
-            onStateChange({ error: err.message || 'Đã xảy ra lỗi không mong muốn.' });
+            // CLEAN ERROR MESSAGE
+            let userErrorMessage = err.message || 'Đã xảy ra lỗi không mong muốn.';
+            if (!userErrorMessage.includes('thử lại')) {
+                userErrorMessage += ". Vui lòng thử lại sau.";
+            }
+            onStateChange({ error: userErrorMessage });
         } finally {
             onStateChange({ isLoading: false });
         }

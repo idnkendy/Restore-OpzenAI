@@ -198,6 +198,11 @@ const InteriorGenerator: React.FC<InteriorGeneratorProps> = ({ state, onStateCha
                     usage_log_id: logId
                 });
             }
+            
+            // Ensure Job is created
+            if (logId && !jobId) {
+                throw new Error("Không thể khởi tạo tác vụ (Job Creation Failed). Đang hoàn tiền...");
+            }
 
             if (jobId) await jobService.updateJobStatus(jobId, 'processing');
 
@@ -231,15 +236,15 @@ const InteriorGenerator: React.FC<InteriorGeneratorProps> = ({ state, onStateCha
                 });
             });
         } catch (err: any) {
-            const errorMessage = err.message || 'Đã xảy ra lỗi không mong muốn.';
-            onStateChange({ error: errorMessage });
+            // SIMPLIFIED ERROR DISPLAY
+            onStateChange({ error: err.message });
 
              if (jobId) {
-                await jobService.updateJobStatus(jobId, 'failed', undefined, errorMessage);
+                await jobService.updateJobStatus(jobId, 'failed', undefined, err.message);
             }
              const { data: { user } } = await supabase.auth.getUser();
-             if (user) {
-                await refundCredits(user.id, cost, `Hoàn tiền: Lỗi khi render nội thất (${errorMessage})`);
+             if (user && logId) {
+                await refundCredits(user.id, cost, `Hoàn tiền: Lỗi khi render nội thất (${err.message})`);
              }
         } finally {
             onStateChange({ isLoading: false });

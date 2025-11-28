@@ -1,9 +1,11 @@
-
 import React, { useState } from 'react';
 import { FileData, Tool, ImageResolution, AspectRatio } from '../types';
 import { SketchConverterState } from '../state/toolState';
 import * as geminiService from '../services/geminiService';
 import * as historyService from '../services/historyService';
+import * as jobService from '../services/jobService';
+import { refundCredits } from '../services/paymentService';
+import { supabase } from '../services/supabaseClient';
 import Spinner from './Spinner';
 import ImageUpload from './common/ImageUpload';
 import ImageComparator from './ImageComparator';
@@ -124,26 +126,48 @@ const SketchConverter: React.FC<SketchConverterProps> = ({ state, onStateChange,
             prompt = `Convert this realistic image into ${styleMap[sketchStyle as 'pencil' | 'charcoal']}. The sketch must be strictly black and white on a clean white background. The final result should look like a hand-drawn artwork. The sketch should have a level of detail that is ${detailMap[detailLevel]}. Do not include any color.`;
         }
 
+        let jobId: string | null = null;
+        let logId: string | null = null;
+
         try {
             if (onDeductCredits) {
-                await onDeductCredits(cost, `Chuyển đổi Sketch (${sketchStyle}) - ${resolution}`);
+                logId = await onDeductCredits(cost, `Chuyển đổi Sketch (${sketchStyle}) - ${resolution}`);
             }
+
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user && logId) {
+                 jobId = await jobService.createJob({
+                    user_id: user.id,
+                    tool_id: Tool.SketchConverter,
+                    prompt: prompt,
+                    cost: cost,
+                    usage_log_id: logId
+                });
+            }
+
+            if (logId && !jobId) {
+                throw new Error("Không thể khởi tạo tác vụ (Job Creation Failed). Đang hoàn tiền...");
+            }
+
+            if (jobId) await jobService.updateJobStatus(jobId, 'processing');
 
             let results: any[] = [];
 
             // High Quality (Pro) Logic
             if (resolution === '1K' || resolution === '2K' || resolution === '4K') {
                 // High Quality generator typically returns 1 image unless configured otherwise, we treat it as 1 here for sketch
-                const images = await geminiService.generateHighQualityImage(prompt, detectedAspectRatio, resolution, sourceImage || undefined);
+                const images = await geminiService.generateHighQualityImage(prompt, detectedAspectRatio, resolution, sourceImage || undefined, jobId || undefined);
                 results = [{ imageUrl: images[0] }];
             } 
             // Standard (Flash) Logic
             else {
-                results = await geminiService.editImage(prompt, sourceImage, 1);
+                results = await geminiService.editImage(prompt, sourceImage, 1, jobId || undefined);
             }
 
             const imageUrl = results[0].imageUrl;
             onStateChange({ resultImage: imageUrl });
+
+            if (jobId) await jobService.updateJobStatus(jobId, 'completed', imageUrl);
 
             historyService.addToHistory({
                 tool: Tool.SketchConverter,
@@ -153,7 +177,21 @@ const SketchConverter: React.FC<SketchConverterProps> = ({ state, onStateChange,
             });
 
         } catch (err: any) {
-            onStateChange({ error: err.message || 'Đã xảy ra lỗi không mong muốn.' });
+            // CLEAN ERROR MESSAGE
+            let userErrorMessage = err.message || 'Đã xảy ra lỗi không mong muốn.';
+            if (!userErrorMessage.includes('thử lại') && !userErrorMessage.includes('credits')) {
+                userErrorMessage += ". Vui lòng thử lại sau.";
+            }
+            onStateChange({ error: userErrorMessage });
+
+            if (jobId) {
+                await jobService.updateJobStatus(jobId, 'failed', undefined, err.message);
+            }
+            
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user && logId) {
+               await refundCredits(user.id, cost, `Hoàn tiền: Lỗi khi chuyển đổi sketch (${err.message})`);
+            }
         } finally {
             onStateChange({ isLoading: false });
         }

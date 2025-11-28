@@ -4,6 +4,9 @@ import { FileData, Tool, ImageResolution, AspectRatio } from '../types';
 import { ImageEditorState } from '../state/toolState';
 import * as geminiService from '../services/geminiService';
 import * as historyService from '../services/historyService';
+import * as jobService from '../services/jobService';
+import { refundCredits } from '../services/paymentService';
+import { supabase } from '../services/supabaseClient';
 import Spinner from './Spinner';
 import ImageUpload from './common/ImageUpload';
 import ResultGrid from './common/ResultGrid';
@@ -105,10 +108,30 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ state, onStateChange, userCre
 
         onStateChange({ isLoading: true, error: null, resultImages: [] });
 
+        let jobId: string | null = null;
+        let logId: string | null = null;
+
         try {
             if (onDeductCredits) {
-                await onDeductCredits(cost, `Chỉnh sửa ảnh (${numberOfImages} ảnh) - ${resolution}`);
+                logId = await onDeductCredits(cost, `Chỉnh sửa ảnh (${numberOfImages} ảnh) - ${resolution}`);
             }
+
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user && logId) {
+                 jobId = await jobService.createJob({
+                    user_id: user.id,
+                    tool_id: Tool.ImageEditing,
+                    prompt: prompt,
+                    cost: cost,
+                    usage_log_id: logId
+                });
+            }
+
+            if (logId && !jobId) {
+                throw new Error("Không thể khởi tạo tác vụ (Job Creation Failed). Đang hoàn tiền...");
+            }
+
+            if (jobId) await jobService.updateJobStatus(jobId, 'processing');
 
             let results: { imageUrl: string }[] = [];
 
@@ -126,7 +149,7 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ state, onStateChange, userCre
                         detectedAspectRatio, // Use detected aspect ratio
                         resolution, 
                         sourceImage, 
-                        undefined, 
+                        jobId || undefined, 
                         referenceImages
                     );
                     return { imageUrl: images[0] };
@@ -137,19 +160,23 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ state, onStateChange, userCre
             else {
                 if (referenceImages && referenceImages.length > 0) {
                     if (maskImage) {
-                        results = await geminiService.editImageWithMaskAndMultipleReferences(prompt, sourceImage, maskImage, referenceImages, numberOfImages);
+                        results = await geminiService.editImageWithMaskAndMultipleReferences(prompt, sourceImage, maskImage, referenceImages, numberOfImages, jobId || undefined);
                     } else {
-                        results = await geminiService.editImageWithMultipleReferences(prompt, sourceImage, referenceImages, numberOfImages);
+                        results = await geminiService.editImageWithMultipleReferences(prompt, sourceImage, referenceImages, numberOfImages, jobId || undefined);
                     }
                 } else if (maskImage) {
-                    results = await geminiService.editImageWithMask(prompt, sourceImage, maskImage, numberOfImages);
+                    results = await geminiService.editImageWithMask(prompt, sourceImage, maskImage, numberOfImages, jobId || undefined);
                 } else {
-                    results = await geminiService.editImage(prompt, sourceImage, numberOfImages);
+                    results = await geminiService.editImage(prompt, sourceImage, numberOfImages, jobId || undefined);
                 }
             }
 
             const imageUrls = results.map(r => r.imageUrl);
             onStateChange({ resultImages: imageUrls });
+
+            if (jobId && imageUrls.length > 0) {
+                await jobService.updateJobStatus(jobId, 'completed', imageUrls[0]);
+            }
 
             imageUrls.forEach(url => {
                 historyService.addToHistory({
@@ -160,7 +187,17 @@ const ImageEditor: React.FC<ImageEditorProps> = ({ state, onStateChange, userCre
                 });
             });
         } catch (err: any) {
-            onStateChange({ error: err.message || 'Đã xảy ra lỗi không mong muốn.' });
+            // SIMPLIFIED ERROR DISPLAY
+            onStateChange({ error: err.message });
+
+            if (jobId) {
+                await jobService.updateJobStatus(jobId, 'failed', undefined, err.message);
+            }
+            
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user && logId) {
+               await refundCredits(user.id, cost, `Hoàn tiền: Lỗi khi chỉnh sửa ảnh (${err.message})`);
+            }
         } finally {
             onStateChange({ isLoading: false });
         }

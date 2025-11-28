@@ -39,49 +39,45 @@ const AuthPage: React.FC<AuthPageProps> = ({ onGoHome }) => {
 
   return (
     <div className="min-h-screen bg-main-bg dark:bg-gray-900 flex flex-col items-center justify-center p-4 relative font-sans">
-        <button onClick={onGoHome} className="absolute top-4 left-4 text-text-secondary dark:text-gray-400 hover:text-accent transition-colors flex items-center gap-2">
+        <button onClick={onGoHome} className="absolute top-4 left-4 text-text-secondary dark:text-gray-400 hover:text-accent transition-colors flex items-center gap-2 text-sm font-medium">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
             Quay lại trang chủ
         </button>
-        <div className="w-full max-w-md">
+        <div className="w-full max-w-md text-center">
             <div className="flex justify-center items-center mb-8">
-                 <Logo className="w-20 h-20 mr-2" />
-                <span className="text-text-primary dark:text-white text-4xl font-bold">OPZEN AI</span>
+                 <Logo className="w-16 h-16 mr-3" />
+                <span className="text-text-primary dark:text-white text-3xl font-bold tracking-tight">OPZEN AI</span>
             </div>
-            <div className="bg-surface dark:bg-dark-bg p-8 rounded-2xl shadow-xl border border-border-color dark:border-gray-700 text-center">
-                <h2 className="text-2xl font-bold text-center text-text-primary dark:text-white mb-3">
-                    Chào mừng bạn!
-                </h2>
-                <p className="text-center text-text-secondary dark:text-gray-400 mb-8">
-                    Đăng nhập để tiếp tục sáng tạo cùng OPZEN AI.
-                </p>
+            
+            <div className="bg-surface dark:bg-dark-bg p-8 rounded-2xl shadow-2xl border border-border-color dark:border-gray-700">
+                <h3 className="text-xl font-bold text-text-primary dark:text-white mb-2">Đăng nhập để tiếp tục</h3>
+                <p className="text-text-secondary dark:text-gray-400 text-sm mb-8">Sử dụng tài khoản Google của bạn để truy cập.</p>
+
+                {error && <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800 text-red-600 dark:text-red-400 rounded-lg text-sm">{error}</div>}
                 
                 {!isSupabaseConfigured && (
-                    <div className="mb-6 p-4 bg-yellow-100 border-l-4 border-yellow-500 text-yellow-800 dark:bg-yellow-900/30 dark:border-yellow-500 dark:text-yellow-300 rounded-r-lg text-left">
-                        <p className="font-bold">Cấu hình còn thiếu!</p>
-                        <p className="text-sm">Chức năng đăng nhập chưa được kích hoạt. Vui lòng kiểm tra file cấu hình Supabase.</p>
+                    <div className="mb-6 p-3 bg-yellow-50 border border-yellow-200 text-yellow-800 dark:bg-yellow-900/20 dark:border-yellow-800 dark:text-yellow-200 rounded-lg text-xs text-center">
+                        Chưa cấu hình Supabase Key. Đăng nhập Google có thể không hoạt động.
                     </div>
                 )}
-                
-                {error && <div className="mb-6 p-3 bg-red-100 border-red-400 text-red-700 dark:bg-red-900/50 dark:border-red-500 dark:text-red-300 rounded-lg text-sm text-left">{error}</div>}
 
                 <button
                   onClick={handleGoogleSignIn}
-                  disabled={loading || !isSupabaseConfigured}
-                  className="w-full flex justify-center items-center gap-3 bg-white hover:bg-gray-50 text-gray-900 font-semibold py-3.5 px-4 rounded-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed border border-gray-300 shadow-sm hover:shadow-md mb-6"
+                  disabled={loading}
+                  className="w-full flex justify-center items-center gap-3 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-900 dark:text-white font-semibold py-3.5 px-4 rounded-xl transition-all duration-200 border border-gray-200 dark:border-gray-600 shadow-sm disabled:opacity-50"
                 >
-                  {loading ? <Spinner /> : (
-                      <>
-                        <GoogleIcon />
-                        <span>Tiếp tục với Google</span>
-                      </>
-                  )}
+                    {loading ? <Spinner /> : (
+                        <>
+                            <GoogleIcon />
+                            <span>Tiếp tục với Google</span>
+                        </>
+                    )}
                 </button>
-                
-                <p className="mt-4 text-xs text-text-secondary dark:text-gray-600">
-                    Bằng việc tiếp tục, bạn đồng ý với Điều khoản dịch vụ và Chính sách bảo mật của chúng tôi.
-                </p>
             </div>
+            
+            <p className="mt-8 text-center text-xs text-text-secondary dark:text-gray-500 max-w-sm mx-auto">
+                Bằng việc đăng nhập, bạn đồng ý với Điều khoản dịch vụ và Chính sách bảo mật của OPZEN AI.
+            </p>
         </div>
     </div>
   );

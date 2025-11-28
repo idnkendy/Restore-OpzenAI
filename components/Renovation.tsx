@@ -4,6 +4,9 @@ import { FileData, Tool, AspectRatio, ImageResolution } from '../types';
 import { RenovationState } from '../state/toolState';
 import * as geminiService from '../services/geminiService';
 import * as historyService from '../services/historyService';
+import * as jobService from '../services/jobService';
+import { refundCredits } from '../services/paymentService';
+import { supabase } from '../services/supabaseClient';
 import Spinner from './Spinner';
 import ImageUpload from './common/ImageUpload';
 import ImageComparator from './ImageComparator';
@@ -13,16 +16,6 @@ import AspectRatioSelector from './common/AspectRatioSelector';
 import ImagePreviewModal from './common/ImagePreviewModal';
 import MaskingModal from './MaskingModal';
 import ResolutionSelector from './common/ResolutionSelector';
-
-
-const renovationSuggestions = [
-    { label: 'Nâng tầng', prompt: 'Nâng thêm 1 tầng cho công trình, giữ phong cách kiến trúc hiện có.' },
-    { label: 'Đổi màu sơn', prompt: 'Thay đổi màu sơn ngoại thất của công trình thành màu trắng kem, các chi tiết cửa sổ màu đen.' },
-    { label: 'Giữ lại khối', prompt: 'Cải tạo lại mặt tiền nhưng giữ nguyên hình khối và cấu trúc chính.' },
-    { label: 'Thay đổi khối', prompt: 'Cải tạo toàn bộ, thay đổi hình khối của công trình để trở nên ấn tượng và hiện đại hơn.' },
-    { label: 'Đưa ảnh vẽ tay/khối vào không gian', prompt: 'Thiết kế hoàn thiện công trình ở ảnh tham chiếu và đưa vào vùng tô đỏ của ảnh thực tế.' },
-    { label: 'Đưa mẫu công trình vào không gian', prompt: 'Đưa mẫu công trình ở ảnh tham chiếu và đưa vào vùng tô đỏ của ảnh thực tế.' },
-];
 
 interface RenovationProps {
     state: RenovationState;
@@ -70,11 +63,32 @@ const Renovation: React.FC<RenovationProps> = ({ state, onStateChange, userCredi
 
         onStateChange({ isLoading: true, error: null, renovatedImages: [] });
 
+        let jobId: string | null = null;
+        let logId: string | null = null;
+
         try {
             // Deduct credits
             if (onDeductCredits) {
-                await onDeductCredits(cost, `Cải tạo thiết kế (${numberOfImages} ảnh) - ${resolution}`);
+                logId = await onDeductCredits(cost, `Cải tạo thiết kế (${numberOfImages} ảnh) - ${resolution}`);
             }
+
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user && logId) {
+                 jobId = await jobService.createJob({
+                    user_id: user.id,
+                    tool_id: Tool.Renovation,
+                    prompt: prompt,
+                    cost: cost,
+                    usage_log_id: logId
+                });
+            }
+
+            // Check job creation
+            if (logId && !jobId) {
+                throw new Error("Không thể khởi tạo tác vụ (Job Creation Failed). Đang hoàn tiền...");
+            }
+
+            if (jobId) await jobService.updateJobStatus(jobId, 'processing');
 
             let results: { imageUrl: string }[] = [];
             let finalPrompt = `Generate an image with a strict aspect ratio of ${aspectRatio}. Adapt the composition from the source image to fit this new frame while performing the renovation. Do not add black bars or letterbox. The renovation instruction is: ${prompt}`;
@@ -86,7 +100,7 @@ const Renovation: React.FC<RenovationProps> = ({ state, onStateChange, userCredi
 
                 const promises = Array.from({ length: numberOfImages }).map(async () => {
                     // Use generateHighQualityImage which takes sourceImage
-                    const images = await geminiService.generateHighQualityImage(finalPrompt, aspectRatio, resolution, sourceImage || undefined);
+                    const images = await geminiService.generateHighQualityImage(finalPrompt, aspectRatio, resolution, sourceImage || undefined, jobId || undefined);
                     return { imageUrl: images[0] };
                 });
                 results = await Promise.all(promises);
@@ -95,19 +109,23 @@ const Renovation: React.FC<RenovationProps> = ({ state, onStateChange, userCredi
             else {
                 if (maskImage && referenceImage) {
                     finalPrompt = `${finalPrompt} Also, take aesthetic inspiration (colors, materials, atmosphere) from the provided reference image for the masked area.`;
-                    results = await geminiService.editImageWithMaskAndReference(finalPrompt, sourceImage, maskImage, referenceImage, numberOfImages);
+                    results = await geminiService.editImageWithMaskAndReference(finalPrompt, sourceImage, maskImage, referenceImage, numberOfImages, jobId || undefined);
                 } else if (maskImage) {
-                     results = await geminiService.editImageWithMask(finalPrompt, sourceImage, maskImage, numberOfImages);
+                     results = await geminiService.editImageWithMask(finalPrompt, sourceImage, maskImage, numberOfImages, jobId || undefined);
                 } else if (referenceImage) {
                     finalPrompt = `${finalPrompt} Also, take aesthetic inspiration (colors, materials, atmosphere) from the provided reference image.`;
-                    results = await geminiService.editImageWithReference(finalPrompt, sourceImage, referenceImage, numberOfImages);
+                    results = await geminiService.editImageWithReference(finalPrompt, sourceImage, referenceImage, numberOfImages, jobId || undefined);
                 } else {
-                    results = await geminiService.editImage(finalPrompt, sourceImage, numberOfImages);
+                    results = await geminiService.editImage(finalPrompt, sourceImage, numberOfImages, jobId || undefined);
                 }
             }
 
             const imageUrls = results.map(r => r.imageUrl);
             onStateChange({ renovatedImages: imageUrls });
+
+            if (jobId && imageUrls.length > 0) {
+                await jobService.updateJobStatus(jobId, 'completed', imageUrls[0]);
+            }
 
             imageUrls.forEach(url => {
                  historyService.addToHistory({
@@ -118,7 +136,17 @@ const Renovation: React.FC<RenovationProps> = ({ state, onStateChange, userCredi
                 });
             });
         } catch (err: any) {
-            onStateChange({ error: err.message || 'Đã xảy ra lỗi không mong muốn.' });
+            // SIMPLIFIED ERROR DISPLAY
+            onStateChange({ error: err.message });
+
+            if (jobId) {
+                await jobService.updateJobStatus(jobId, 'failed', undefined, err.message);
+            }
+            
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user && logId) {
+               await refundCredits(user.id, cost, `Hoàn tiền: Lỗi khi cải tạo (${err.message})`);
+            }
         } finally {
             onStateChange({ isLoading: false });
         }
@@ -130,15 +158,6 @@ const Renovation: React.FC<RenovationProps> = ({ state, onStateChange, userCredi
 
     const handleReferenceFileSelect = (fileData: FileData | null) => {
         onStateChange({ referenceImage: fileData });
-    };
-
-    const handleSuggestionSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        const selectedPrompt = e.target.value;
-        if (selectedPrompt) {
-            const newPrompt = prompt.trim() ? `${prompt.trim()}. ${selectedPrompt}` : selectedPrompt;
-            onStateChange({ prompt: newPrompt });
-            e.target.value = ""; // Reset dropdown after selection
-        }
     };
 
     const handleDownload = () => {
@@ -225,28 +244,6 @@ const Renovation: React.FC<RenovationProps> = ({ state, onStateChange, userCredi
                                     value={prompt}
                                     onChange={(e) => onStateChange({ prompt: e.target.value })}
                                 />
-                                 <div className="mt-3">
-                                     <label htmlFor="renovation-suggestions" className="block text-sm font-medium text-text-secondary dark:text-gray-400 mb-2">Thêm gợi ý nhanh</label>
-                                     <div className="relative">
-                                        <select
-                                            id="renovation-suggestions"
-                                            onChange={handleSuggestionSelect}
-                                            className="w-full bg-main-bg dark:bg-gray-700/50 border border-border-color dark:border-gray-600 rounded-lg p-3 text-text-primary dark:text-gray-200 focus:ring-2 focus:ring-accent focus:outline-none transition-all appearance-none pr-10"
-                                            defaultValue=""
-                                            aria-label="Chọn gợi ý nhanh cho việc cải tạo"
-                                        >
-                                            <option value="" disabled>Chọn một gợi ý...</option>
-                                            {renovationSuggestions.map((suggestion) => (
-                                                <option key={suggestion.label} value={suggestion.prompt}>
-                                                    {suggestion.label}
-                                                </option>
-                                            ))}
-                                        </select>
-                                        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-text-secondary dark:text-gray-400">
-                                           <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 20"><path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M6 8l4 4 4-4"/></svg>
-                                        </div>
-                                    </div>
-                                </div>
                             </div>
                              <div className="flex-grow"></div>
                              <div className="space-y-4">

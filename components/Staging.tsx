@@ -1,9 +1,11 @@
-
 import React, { useState } from 'react';
 import { FileData, Tool, ImageResolution, AspectRatio } from '../types';
 import { StagingState } from '../state/toolState';
 import * as geminiService from '../services/geminiService';
 import * as historyService from '../services/historyService';
+import * as jobService from '../services/jobService';
+import { refundCredits } from '../services/paymentService';
+import { supabase } from '../services/supabaseClient';
 import Spinner from './Spinner';
 import ImageUpload from './common/ImageUpload';
 import MultiImageUpload from './common/MultiImageUpload';
@@ -86,10 +88,30 @@ const Staging: React.FC<StagingProps> = ({ state, onStateChange, userCredits = 0
 
         onStateChange({ isLoading: true, error: null, resultImages: [] });
 
+        let jobId: string | null = null;
+        let logId: string | null = null;
+
         try {
              if (onDeductCredits) {
-                await onDeductCredits(cost, `AI Staging (${numberOfImages} ảnh) - ${resolution}`);
+                logId = await onDeductCredits(cost, `AI Staging (${numberOfImages} ảnh) - ${resolution}`);
             }
+
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user && logId) {
+                 jobId = await jobService.createJob({
+                    user_id: user.id,
+                    tool_id: Tool.Staging,
+                    prompt: prompt,
+                    cost: cost,
+                    usage_log_id: logId
+                });
+            }
+
+            if (logId && !jobId) {
+                throw new Error("Không thể khởi tạo tác vụ (Job Creation Failed). Đang hoàn tiền...");
+            }
+
+            if (jobId) await jobService.updateJobStatus(jobId, 'processing');
 
             let results: { imageUrl: string }[] = [];
             const fullPrompt = `Integrate the objects from the provided reference images into the main scene image. Follow these instructions for placement and style: ${prompt}. Ensure the objects are realistically scaled, lit, and shadowed to match the environment of the main scene.`;
@@ -103,7 +125,7 @@ const Staging: React.FC<StagingProps> = ({ state, onStateChange, userCredits = 0
                         detectedAspectRatio, // Use detected ratio
                         resolution, 
                         sceneImage, 
-                        undefined, 
+                        jobId || undefined, 
                         objectImages
                     );
                     return { imageUrl: images[0] };
@@ -112,11 +134,15 @@ const Staging: React.FC<StagingProps> = ({ state, onStateChange, userCredits = 0
             }
             // Standard (Flash) Logic
             else {
-                results = await geminiService.generateStagingImage(fullPrompt, sceneImage, objectImages, numberOfImages);
+                results = await geminiService.generateStagingImage(fullPrompt, sceneImage, objectImages, numberOfImages, jobId || undefined);
             }
 
             const imageUrls = results.map(r => r.imageUrl);
             onStateChange({ resultImages: imageUrls });
+
+            if (jobId && imageUrls.length > 0) {
+                await jobService.updateJobStatus(jobId, 'completed', imageUrls[0]);
+            }
 
             imageUrls.forEach(url => {
                  historyService.addToHistory({
@@ -128,7 +154,21 @@ const Staging: React.FC<StagingProps> = ({ state, onStateChange, userCredits = 0
             });
 
         } catch (err: any) {
-            onStateChange({ error: err.message || 'Đã xảy ra lỗi không mong muốn.' });
+            // CLEAN ERROR MESSAGE
+            let userErrorMessage = err.message || 'Đã xảy ra lỗi không mong muốn.';
+            if (!userErrorMessage.includes('thử lại') && !userErrorMessage.includes('credits')) {
+                userErrorMessage += ". Vui lòng thử lại sau.";
+            }
+            onStateChange({ error: userErrorMessage });
+
+            if (jobId) {
+                await jobService.updateJobStatus(jobId, 'failed', undefined, err.message);
+            }
+            
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user && logId) {
+               await refundCredits(user.id, cost, `Hoàn tiền: Lỗi khi staging (${err.message})`);
+            }
         } finally {
             onStateChange({ isLoading: false });
         }

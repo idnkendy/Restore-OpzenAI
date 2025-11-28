@@ -4,92 +4,81 @@ import { AspectRatio, FileData, ImageResolution } from "../types";
 import { supabase } from "./supabaseClient";
 import { updateJobApiKey } from "./jobService";
 
-// --- HELPER: Safe Environment Variable Access ---
-const getEnvironmentApiKey = (): string | undefined => {
-    try {
-        // @ts-ignore
-        if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
-            // @ts-ignore
-            return process.env.API_KEY;
-        }
-        // Fallback or safe check
-        return undefined;
-    } catch (e) {
-        return undefined;
-    }
-};
+// --- HELPER: Strict Error Parsing & Formatting ---
+const formatError = (error: any): string => {
+    let status: string | number = 'ERR';
+    let shortMsg = "Lỗi dịch vụ"; // Default
 
-// --- HELPER: Parse Error Object Robustly ---
-const getErrorDetails = (error: any) => {
-    let status = error.status || error.response?.status;
-    let message = error.message || '';
-
-    if (error.error) {
-        if (error.error.code) status = error.error.code;
-        if (error.error.message) message = error.error.message;
-    }
-    
-    if (error.body) {
-        try {
-             const body = JSON.parse(error.body);
-             if (body.error) {
-                 status = body.error.code || status;
-                 message = body.error.message || message;
-             }
-        } catch (e) {}
-    }
-
-    if (typeof message === 'string') {
-        if (message.startsWith('{') || message.startsWith('[')) {
+    // 1. Extract status code from various sources
+    if (error) {
+        // Try parsing JSON string if it looks like one
+        if (typeof error === 'string' && (error.trim().startsWith('{') || error.trim().startsWith('['))) {
             try {
-                const parsed = JSON.parse(message);
+                const parsed = JSON.parse(error);
                 if (parsed.error) {
-                    status = parsed.error.code || status;
-                    message = parsed.error.message || message;
+                    status = parsed.error.code || parsed.error.status || status;
+                } else if (parsed.code) {
+                    status = parsed.code;
                 }
             } catch (e) {}
         }
-        
-        if (!status) {
-            if (message.includes('429') || message.toLowerCase().includes('quota') || message.toLowerCase().includes('exhausted')) {
-                status = 429;
-            } else if (message.includes('400') || message.toLowerCase().includes('billing')) {
-                status = 400;
-            } else if (message.includes('503') || message.toLowerCase().includes('overloaded')) {
-                status = 503;
-            }
+        // Direct object properties
+        else if (typeof error === 'object') {
+            if (error.status) status = error.status;
+            if (error.code) status = error.code;
+            if (error.error?.code) status = error.error.code;
+            if (error.error?.status) status = error.error.status;
         }
     }
 
-    return { 
-        status: Number(status), 
-        message: String(message) 
-    };
+    // 2. Normalize and Map Status to Short Message
+    const statusStr = String(status);
+    const rawMsg = JSON.stringify(error).toLowerCase();
+
+    if (statusStr == '403' || statusStr === 'PERMISSION_DENIED' || rawMsg.includes('permission') || rawMsg.includes('403')) {
+        status = 403;
+        shortMsg = "Lỗi quyền truy cập";
+    } else if (statusStr == '429' || statusStr === 'RESOURCE_EXHAUSTED' || rawMsg.includes('quota') || rawMsg.includes('exhausted') || rawMsg.includes('429')) {
+        status = 429;
+        shortMsg = "Hệ thống bận";
+    } else if (statusStr == '503' || statusStr === 'UNAVAILABLE' || rawMsg.includes('overloaded') || rawMsg.includes('unavailable') || rawMsg.includes('503')) {
+        status = 503;
+        shortMsg = "Máy chủ quá tải";
+    } else if (statusStr == '400' || statusStr === 'INVALID_ARGUMENT' || rawMsg.includes('invalid') || rawMsg.includes('bad request') || rawMsg.includes('400')) {
+        status = 400;
+        shortMsg = "Dữ liệu không hợp lệ";
+    } else if (statusStr === 'SAFE' || rawMsg.includes('safety') || rawMsg.includes('blocked')) {
+        status = 'SAFE';
+        shortMsg = "Nội dung bị chặn";
+    } else if (rawMsg.includes('fetch') || rawMsg.includes('network') || rawMsg.includes('failed to fetch')) {
+        status = 'NET';
+        shortMsg = "Lỗi kết nối mạng";
+    } else if (rawMsg.includes('system_busy')) {
+        status = 'BUSY';
+        shortMsg = "Tài nguyên bận";
+    }
+
+    // 3. Return Strict Format
+    return `[${status}] ${shortMsg}. Vui lòng thử lại sau.`;
 };
 
 const markKeyAsExhausted = async (key: string) => {
     try {
-        // Only mark if it's a valid key string
         if (key && key.length > 10) {
-            console.warn(`[GeminiService] Marking key ...${key.slice(-4)} as exhausted.`);
-            await supabase.rpc('mark_key_exhausted', { key_val: key });
+            // Fire and forget
+            supabase.rpc('mark_key_exhausted', { key_val: key }).then(() => {});
         }
-    } catch (e) {
-        console.error("Failed to mark key as exhausted:", e);
-    }
+    } catch (e) {}
 };
 
 const getAIClient = async (jobId?: string): Promise<{ ai: GoogleGenAI, key: string }> => {
-    // Always use Worker Keys (Supabase) as requested
     try {
-        if (!supabase) {
-            throw new Error("SYSTEM_BUSY"); 
-        }
+        if (!supabase) throw new Error("SYSTEM_BUSY"); 
 
         const { data: apiKey, error } = await supabase.rpc('get_worker_key');
 
         if (error || !apiKey) {
-            console.warn("[GeminiService] Supabase get_worker_key failed or empty:", error?.message);
+            console.warn("[Gemini] No key available");
             throw new Error("SYSTEM_BUSY");
         }
 
@@ -114,7 +103,6 @@ async function withSmartRetry<T>(
     let lastError: any;
     let attempts = 0;
     const failedKeys = new Set<string>(); 
-    let consecutiveQuotaErrors = 0; 
 
     while (attempts < maxRetries) {
         let currentKey = "";
@@ -133,91 +121,56 @@ async function withSmartRetry<T>(
             return result;
 
         } catch (error: any) {
-             const { status, message } = getErrorDetails(error);
              lastError = error;
              
-             const isQuota = status === 429 || message.includes('quota') || message.includes('exhausted') || message.includes('429');
-             const isBilling = status === 400 && (message.includes('billed users') || message.includes('billing') || message.includes('credits'));
-             const isSystemBusy = message === "SYSTEM_BUSY";
-             const isOverloaded = status === 503 || message.toLowerCase().includes('overloaded');
+             // Quick check for error type to decide retry strategy
+             const errStr = JSON.stringify(error).toLowerCase();
+             const isQuota = errStr.includes('429') || errStr.includes('quota') || errStr.includes('exhausted');
+             const isSystemBusy = error.message === "SYSTEM_BUSY";
+             const isSafety = errStr.includes('safety') || errStr.includes('blocked');
+             const isPermission = errStr.includes('403') || errStr.includes('permission');
+
+             // Critical errors - Stop immediately
+             if (isSafety) throw new Error(formatError({ status: 'SAFE', message: 'Safety blocked' }));
+             
+             // If it's a key permission error (403), mark key and retry
+             if (isPermission) {
+                 if (currentKey) {
+                     await markKeyAsExhausted(currentKey);
+                     failedKeys.add(currentKey);
+                 }
+                 attempts++;
+                 continue;
+             }
 
              if (isSystemBusy) {
-                 console.warn("[GeminiService] No keys available. Waiting 3s before retry...");
-                 await new Promise(r => setTimeout(r, 3000));
+                 await new Promise(r => setTimeout(r, 2000));
                  attempts++;
                  continue; 
              }
 
              if (isQuota) {
-                 consecutiveQuotaErrors++;
                  if (currentKey) {
                      await markKeyAsExhausted(currentKey);
                      failedKeys.add(currentKey);
                  }
-                 const baseDelay = 2000; 
-                 const backoff = Math.pow(1.5, consecutiveQuotaErrors); 
-                 const jitter = Math.random() * 1000;
-                 const delay = Math.min((baseDelay * backoff) + jitter, 20000);
-
-                 console.warn(`[GeminiService] Rate limit (429). Key exhausted. Pausing for ${Math.round(delay)}ms...`);
-                 await new Promise(r => setTimeout(r, delay));
-                 
+                 await new Promise(r => setTimeout(r, 1500));
                  attempts++;
                  continue; 
              }
              
-             if (isBilling) {
-                 console.warn(`[GeminiService] Key ...${currentKey?.slice(-4)} has billing restriction (400). Triggering Fallback.`);
-                 throw error;
-             }
-             
-             consecutiveQuotaErrors = 0;
-
-             // Improved logic for 503 Overloaded with exponential backoff
-             if (isOverloaded || status === 500) {
-                 attempts++;
-                 const delay = Math.min(2000 * Math.pow(1.5, attempts), 15000); // Cap wait at 15s
-                 console.warn(`[GeminiService] Server Overloaded (${status}). Retrying in ${Math.round(delay)}ms...`);
-                 await new Promise(r => setTimeout(r, delay));
-                 continue;
-             }
-
-             if (!status) {
-                 console.warn(`[GeminiService] Network or unknown error. Retrying...`);
-                 attempts++; 
-                 await new Promise(r => setTimeout(r, 1000));
-                 continue;
-             }
-
-             throw error; 
+             // Generic retry
+             attempts++; 
+             await new Promise(r => setTimeout(r, 1000));
         }
     }
 
-    // Final Error Formatting
-    if (lastError) {
-        const { status, message } = getErrorDetails(lastError);
-        if (status === 503 || message.toLowerCase().includes('overloaded')) {
-            throw new Error("Hệ thống AI (Google Gemini) đang quá tải. Vui lòng thử lại sau ít phút.");
-        }
-        
-        // Clean up raw JSON errors if they leak through
-        if (typeof message === 'string' && (message.startsWith('{') || message.startsWith('['))) {
-             try {
-                 const parsed = JSON.parse(message);
-                 const cleanMsg = parsed.error?.message || parsed.message || message;
-                 throw new Error(`Lỗi từ AI: ${cleanMsg}`);
-             } catch (e) {
-                 // ignore
-             }
-        }
-    }
-
-    throw lastError || new Error("Dịch vụ hiện không khả dụng. Vui lòng thử lại sau.");
+    // Throw finalized formatted error
+    throw new Error(formatError(lastError));
 }
 
 // --- GENERATION FUNCTIONS ---
 
-// Standard "Nano Banana Flash" (gemini-2.5-flash-image)
 export const generateStandardImage = async (
     prompt: string, 
     aspectRatio: AspectRatio, 
@@ -225,20 +178,13 @@ export const generateStandardImage = async (
     sourceImage?: FileData,
     jobId?: string
 ): Promise<string[]> => {
-    console.log("[GeminiService] Generating Standard Image (Nano Banana Flash)");
     return withSmartRetry(async (ai) => {
         const parts: any[] = [];
-        
-        // Source Image for Edit/Variation
         if (sourceImage) {
             parts.push({
-                inlineData: {
-                    mimeType: sourceImage.mimeType,
-                    data: sourceImage.base64
-                }
+                inlineData: { mimeType: sourceImage.mimeType, data: sourceImage.base64 }
             });
         }
-        
         parts.push({ text: prompt });
 
         const promises = Array.from({ length: numberOfImages }).map(async () => {
@@ -247,13 +193,11 @@ export const generateStandardImage = async (
                 contents: { parts },
                 config: { 
                     responseModalities: [Modality.IMAGE],
-                    // Note: 2.5-flash-image supports aspectRatio but not imageSize
                     imageConfig: { aspectRatio: aspectRatio } 
                 },
             });
             
             let imageUrl = '';
-            // Iterate through parts to find image
             if (response.candidates?.[0]?.content?.parts) {
                 for (const part of response.candidates[0].content.parts) {
                     if (part.inlineData) {
@@ -261,60 +205,13 @@ export const generateStandardImage = async (
                     }
                 }
             }
-            
-            if (!imageUrl) throw new Error("No image data returned from Standard Model");
+            if (!imageUrl) throw new Error("No image data returned");
             return imageUrl;
         });
         return Promise.all(promises);
     }, jobId);
 };
 
-// Fallback using legacy Imagen
-const generateImageFallback = async (prompt: string, numberOfImages: number, jobId?: string): Promise<string[]> => {
-    console.warn(`[GeminiService] Triggering Fallback`);
-    return withSmartRetry(async (ai) => {
-        const parts = [{ text: prompt }];
-        const promises = Array.from({ length: numberOfImages }).map(async () => {
-            const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash-image',
-                contents: { parts },
-                config: { responseModalities: [Modality.IMAGE] },
-            });
-            const part = response.candidates?.[0]?.content?.parts?.[0];
-            if (part?.inlineData) {
-                return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-            }
-            throw new Error("No image data in fallback response");
-        });
-        return Promise.all(promises);
-    }, jobId);
-};
-
-// Legacy Imagen export - kept for compatibility but mapped to standard generation flows often
-export const generateImage = async (prompt: string, aspectRatio: AspectRatio, numberOfImages: number = 1, jobId?: string): Promise<string[]> => {
-    // We prefer the standard image function for "Nano Banana" compliance, but this exists for generic calls
-    try {
-        return await withSmartRetry(async (ai) => {
-            const response = await ai.models.generateImages({
-                model: 'imagen-4.0-generate-001',
-                prompt: prompt,
-                config: {
-                    numberOfImages: numberOfImages,
-                    outputMimeType: 'image/jpeg',
-                    aspectRatio: aspectRatio,
-                },
-            });
-            if (!response.generatedImages) throw new Error("No images generated");
-            return response.generatedImages.map(img => `data:image/jpeg;base64,${img.image.imageBytes}`);
-        }, jobId);
-
-    } catch (error: any) {
-        return await generateImageFallback(prompt, numberOfImages, jobId);
-    }
-};
-
-// --- Nano Banana Pro (Gemini 3.0 Pro) ---
-// Supports 1K, 2K, 4K
 export const generateHighQualityImage = async (
     prompt: string, 
     aspectRatio: AspectRatio, 
@@ -323,53 +220,33 @@ export const generateHighQualityImage = async (
     jobId?: string,
     referenceImages?: FileData[]
 ): Promise<string[]> => {
-    
-    console.log("[GeminiService] Generating High Quality Image (Nano Banana Pro / Gemini 3.0)");
-
     return withSmartRetry(async (ai) => {
         const contents: any = { parts: [] };
-        
         if (sourceImage) {
             contents.parts.push({
-                inlineData: {
-                    mimeType: sourceImage.mimeType,
-                    data: sourceImage.base64
-                }
+                inlineData: { mimeType: sourceImage.mimeType, data: sourceImage.base64 }
             });
         }
-
         if (referenceImages && referenceImages.length > 0) {
             referenceImages.forEach(img => {
                 contents.parts.push({
-                    inlineData: {
-                        mimeType: img.mimeType,
-                        data: img.base64
-                    }
+                    inlineData: { mimeType: img.mimeType, data: img.base64 }
                 });
             });
         }
-
-        // Text prompt should ideally be last or mixed, checking guidelines.
-        // For multimodal, order matters less but text is usually last.
-        // We append text instructions.
         if (sourceImage || (referenceImages && referenceImages.length > 0)) {
              contents.parts.push({ text: `${prompt}. Maintain composition/style from provided images.` });
         } else {
              contents.parts.push({ text: prompt });
         }
 
-        // Map resolution to API accepted string (1K, 2K, 4K)
-        // If 'Standard' is passed here by mistake, default to 1K
         const imageSize = (resolution === 'Standard' ? '1K' : resolution) as "1K" | "2K" | "4K";
 
         const response = await ai.models.generateContent({
             model: 'gemini-3-pro-image-preview',
             contents: contents,
             config: {
-                imageConfig: {
-                    aspectRatio: aspectRatio,
-                    imageSize: imageSize
-                }
+                imageConfig: { aspectRatio: aspectRatio, imageSize: imageSize }
             },
         });
 
@@ -381,15 +258,10 @@ export const generateHighQualityImage = async (
                 }
             }
         }
-
-        if (images.length === 0) {
-            throw new Error("Gemini 3.0 Pro không trả về hình ảnh. Có thể do nội dung bị chặn.");
-        }
-
+        if (images.length === 0) throw new Error("No image data returned");
         return images;
     }, jobId);
 };
-
 
 export const generateVideo = async (prompt: string, startImage?: FileData, jobId?: string): Promise<string> => {
     return withSmartRetry(async (ai, key) => {
@@ -418,10 +290,10 @@ export const generateVideo = async (prompt: string, startImage?: FileData, jobId
         }
         
         const videoUri = operation.response?.generatedVideos?.[0]?.video?.uri;
-        if (!videoUri) throw new Error("Video generation failed: No URI returned.");
+        if (!videoUri) throw new Error("No video URI");
         
         const videoResponse = await fetch(`${videoUri}&key=${key}`);
-        if (!videoResponse.ok) throw new Error("Failed to download video.");
+        if (!videoResponse.ok) throw new Error("Download failed");
         
         const blob = await videoResponse.blob();
         return new Promise((resolve) => {
@@ -432,8 +304,7 @@ export const generateVideo = async (prompt: string, startImage?: FileData, jobId
     }, jobId);
 };
 
-// --- EDIT / TEXT FUNCTIONS ---
-
+// --- EDIT HELPER ---
 const generateGeminiEdit = async (parts: any[], numberOfImages: number, jobId?: string): Promise<{imageUrl: string, text: string}[]> => {
     return withSmartRetry(async (ai) => {
         const promises = Array.from({ length: numberOfImages }).map(async () => {
@@ -442,15 +313,12 @@ const generateGeminiEdit = async (parts: any[], numberOfImages: number, jobId?: 
                 contents: { parts },
                 config: { responseModalities: [Modality.IMAGE] },
             });
-            
             let imageUrl = '';
             const part = response.candidates?.[0]?.content?.parts?.[0];
-            
             if (part?.inlineData) {
                 imageUrl = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
             }
-            
-            if (!imageUrl) throw new Error("No image returned.");
+            if (!imageUrl) throw new Error("No image returned");
             return { imageUrl, text: '' };
         });
         return Promise.all(promises);
@@ -553,7 +421,7 @@ export const enhancePrompt = async (prompt: string, image?: FileData): Promise<s
 };
 
 export const generateMoodboardPromptFromScene = async (image: FileData): Promise<string> => {
-    return generatePromptFromImageAndText(image, "Create a detailed moodboard prompt describing style, colors, and materials.");
+    return generatePromptFromImageAndText(image, "Create moodboard prompt.");
 };
 
 export const generatePromptSuggestions = async (image: FileData, subject: string, count: number, instruction: string): Promise<Record<string, string[]>> => {

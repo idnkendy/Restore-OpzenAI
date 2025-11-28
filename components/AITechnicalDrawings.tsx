@@ -1,9 +1,11 @@
-
 import React, { useState } from 'react';
 import { FileData, Tool, ImageResolution, AspectRatio } from '../types';
 import { AITechnicalDrawingsState } from '../state/toolState';
 import * as geminiService from '../services/geminiService';
 import * as historyService from '../services/historyService';
+import * as jobService from '../services/jobService';
+import { refundCredits } from '../services/paymentService';
+import { supabase } from '../services/supabaseClient';
 import Spinner from './Spinner';
 import ImageUpload from './common/ImageUpload';
 import ImageComparator from './ImageComparator';
@@ -117,25 +119,47 @@ const AITechnicalDrawings: React.FC<AITechnicalDrawingsProps> = ({ state, onStat
 
         const prompt = `From this photorealistic 3D architectural rendering, generate ${drawingTypeMap[drawingType]}. The drawing must be strictly orthographic (no perspective), with clean, thin black lines on a white background, in the style of a technical architectural drawing. ${detailLevelMap[detailLevel]}`;
 
+        let jobId: string | null = null;
+        let logId: string | null = null;
+
         try {
             if (onDeductCredits) {
-                await onDeductCredits(cost, `Tạo bản vẽ kỹ thuật (${drawingType}) - ${resolution}`);
+                logId = await onDeductCredits(cost, `Tạo bản vẽ kỹ thuật (${drawingType}) - ${resolution}`);
             }
+
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user && logId) {
+                 jobId = await jobService.createJob({
+                    user_id: user.id,
+                    tool_id: Tool.AITechnicalDrawings,
+                    prompt: prompt,
+                    cost: cost,
+                    usage_log_id: logId
+                });
+            }
+
+            if (logId && !jobId) {
+                throw new Error("Không thể khởi tạo tác vụ (Job Creation Failed). Đang hoàn tiền...");
+            }
+
+            if (jobId) await jobService.updateJobStatus(jobId, 'processing');
 
             let results: any[] = [];
 
             // High Quality (Pro) Logic
             if (resolution === '1K' || resolution === '2K' || resolution === '4K') {
-                const images = await geminiService.generateHighQualityImage(prompt, detectedAspectRatio, resolution, sourceImage || undefined);
+                const images = await geminiService.generateHighQualityImage(prompt, detectedAspectRatio, resolution, sourceImage || undefined, jobId || undefined);
                 results = [{ imageUrl: images[0] }];
             }
             // Standard (Flash) Logic
             else {
-                results = await geminiService.editImage(prompt, sourceImage, 1);
+                results = await geminiService.editImage(prompt, sourceImage, 1, jobId || undefined);
             }
 
             const imageUrl = results[0].imageUrl;
             onStateChange({ resultImage: imageUrl });
+
+            if (jobId) await jobService.updateJobStatus(jobId, 'completed', imageUrl);
 
             historyService.addToHistory({
                 tool: Tool.AITechnicalDrawings,
@@ -145,7 +169,21 @@ const AITechnicalDrawings: React.FC<AITechnicalDrawingsProps> = ({ state, onStat
             });
 
         } catch (err: any) {
-            onStateChange({ error: err.message || 'Đã xảy ra lỗi không mong muốn.' });
+            // CLEAN ERROR MESSAGE
+            let userErrorMessage = err.message || 'Đã xảy ra lỗi không mong muốn.';
+            if (!userErrorMessage.includes('thử lại') && !userErrorMessage.includes('credits')) {
+                userErrorMessage += ". Vui lòng thử lại sau.";
+            }
+            onStateChange({ error: userErrorMessage });
+
+            if (jobId) {
+                await jobService.updateJobStatus(jobId, 'failed', undefined, err.message);
+            }
+            
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user && logId) {
+               await refundCredits(user.id, cost, `Hoàn tiền: Lỗi khi tạo bản vẽ kỹ thuật (${err.message})`);
+            }
         } finally {
             onStateChange({ isLoading: false });
         }

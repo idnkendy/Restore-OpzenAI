@@ -20,32 +20,6 @@ const loadingMessages = [
     "Sắp xong rồi, kiên nhẫn nhé...",
 ];
 
-const exteriorSuggestions = [
-    { label: 'Tiếp Cận Công Trình Từ Xa (Flycam)', prompt: 'Một video flycam bay chậm rãi tiến lại gần công trình từ xa.' },
-    { label: 'Bay Vòng Quanh Toàn Cảnh (Orbit)', prompt: 'Một video flycam bay vòng quanh công trình để thể hiện mọi góc cạnh.' },
-    { label: 'Góc Nhìn Thấp Hùng Vĩ (Low Angle)', prompt: 'Một video quay từ góc thấp, di chuyển camera từ từ lên cao để thể hiện sự hoành tráng.' },
-    { label: 'Time-lapse Chuyển Giao Ngày Đêm', prompt: 'Một video time-lapse cho thấy sự thay đổi ánh sáng từ ngày sang đêm trên công trình.' },
-    { label: 'Góc Nhìn Người Đi Bộ Tiếp Cận', prompt: 'Một video mô phỏng góc nhìn người đi bộ tiến lại gần cổng chính của công trình.' },
-    { label: 'Nâng Cao Tầm Nhìn (Crane Shot)', prompt: 'Một video quay từ góc thấp, di chuyển camera thẳng đứng lên cao giống như một cần cẩu (crane shot), thể hiện sự cao lớn của công trình.' },
-    { label: 'Hiệu Ứng Vertigo (Dolly Zoom)', prompt: 'Một video sử dụng hiệu ứng dolly zoom, trong đó camera di chuyển ra xa trong khi ống kính zoom vào, giữ nguyên kích thước công trình nhưng thay đổi phối cảnh nền.' },
-    { label: 'Hyper-lapse Dòng Thời Gian Chuyển Động', prompt: 'Một video hyper-lapse (time-lapse di chuyển) tiến lại gần công trình, cho thấy sự nhộn nhịp của xe cộ và người đi bộ xung quanh.' },
-    { label: 'Đường Bay Cong Giờ Vàng (Arc shot)', prompt: 'Một video flycam bay theo một đường cong rộng trong giờ vàng (bình minh hoặc hoàng hôn), với ánh nắng ấm áp chiếu xiên lên mặt tiền công trình.' },
-    { label: 'Hiện Ra Từ Sau Vật Cản (Reveal Shot)', prompt: 'Một video flycam bay vòng quanh, ban đầu bị che khuất bởi cây cối hoặc một công trình khác, sau đó dần dần hiện ra toàn bộ công trình.' },
-];
-
-const interiorSuggestions = [
-    { label: 'Lia Máy Quét Toàn Cảnh Phòng (Pan)', prompt: 'Một video lia máy quay chậm rãi từ trái sang phải để bao quát toàn bộ không gian phòng.' },
-    { label: 'Bước Vào Không Gian (Walk-in)', prompt: 'Một video mô phỏng góc nhìn người đi bộ từ từ bước vào phòng từ cửa chính.' },
-    { label: 'Cận Cảnh Chi Tiết Nội Thất (Zoom)', prompt: 'Một video tập trung zoom vào một chi tiết nội thất đặc sắc (VD: bộ sofa, bàn ăn, đèn trang trí).' },
-    { label: 'Hướng Nhìn Ra Cửa Sổ (Window View)', prompt: 'Một video di chuyển camera hướng về phía cửa sổ lớn, thể hiện khung cảnh bên ngoài.' },
-    { label: 'Bao Quát Từ Trần Xuống (Top-down)', prompt: 'Một video quay từ trên cao xuống, bao quát toàn bộ layout và cách bố trí nội thất.' },
-    { label: 'Tập Trung Vào Chi Tiết (Push-in)', prompt: 'Một video di chuyển camera chậm rãi từ góc rộng của căn phòng và tiến thẳng vào một chi tiết cụ thể, như một bức tranh hoặc một lọ hoa.' },
-    { label: 'Mở Rộng Ra Toàn Cảnh (Pull-back)', prompt: 'Một video bắt đầu từ một cảnh quay cận cảnh một đồ vật, sau đó từ từ kéo camera ra xa để tiết lộ toàn bộ không gian nội thất.' },
-    { label: 'Di Chuyển Theo Lối Đi (Follow Path)', prompt: 'Một video mô phỏng góc nhìn người đi bộ di chuyển theo một con đường tự nhiên trong nhà, ví dụ từ phòng khách đến nhà bếp.' },
-    { label: 'Lướt Theo Chi Tiết Kiến Trúc (Detail Pan)', prompt: 'Một video lia máy quay dọc theo một chi tiết kiến trúc, như một trần nhà độc đáo, một hệ lam trang trí, hoặc một bức tường có vật liệu đặc biệt.' },
-    { label: 'Time-lapse Vệt Nắng Trong Phòng', prompt: 'Một video time-lapse quay cảnh ánh nắng mặt trời di chuyển qua căn phòng, tạo ra các vệt sáng và bóng đổ thay đổi trên đồ đạc và sàn nhà.' },
-];
-
 const FilmIcon = () => (
     <svg xmlns="http://www.w3.org/2000/svg" className="mx-auto h-12 w-12 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" />
@@ -85,7 +59,7 @@ const VideoGenerator: React.FC<VideoGeneratorProps> = ({ state, onStateChange, u
         );
     }
 
-    const { prompt, startImage, isLoading, loadingMessage, error, generatedVideoUrl, mode } = state;
+    const { prompt, startImage, isLoading, loadingMessage, error, generatedVideoUrl } = state;
     
     const [renderSource, setRenderSource] = useState<'google' | 'veo3_external'>('veo3_external');
     // Mặc định rỗng để dùng relative path của Vercel (/api/py/...)
@@ -104,15 +78,6 @@ const VideoGenerator: React.FC<VideoGeneratorProps> = ({ state, onStateChange, u
             if (interval) clearInterval(interval);
         };
     }, [isLoading, loadingMessage, onStateChange]);
-
-    const handleSuggestionSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        const selectedPrompt = e.target.value;
-        if (selectedPrompt) {
-            const newPrompt = prompt.trim() ? `${prompt.trim()}. ${selectedPrompt}` : selectedPrompt;
-            onStateChange({ prompt: newPrompt });
-            e.target.value = ""; 
-        }
-    };
 
     // Fixed cost: 5 credits
     const cost = 5; 
@@ -145,14 +110,19 @@ const VideoGenerator: React.FC<VideoGeneratorProps> = ({ state, onStateChange, u
 
             // 2. Create Job
             const { data: { user } } = await supabase.auth.getUser();
-            if (user) {
+            if (user && logId) {
                  jobId = await jobService.createJob({
                     user_id: user.id,
                     tool_id: Tool.VideoGeneration,
                     prompt: prompt,
                     cost: cost,
-                    usage_log_id: logId || undefined
+                    usage_log_id: logId
                 });
+            }
+            
+            // Check job creation
+            if (logId && !jobId) {
+                throw new Error("Không thể khởi tạo tác vụ video. Đang hoàn tiền...");
             }
 
             if (jobId) await jobService.updateJobStatus(jobId, 'processing');
@@ -178,19 +148,15 @@ const VideoGenerator: React.FC<VideoGeneratorProps> = ({ state, onStateChange, u
 
         } catch (err: any) {
             console.error("Generation Error:", err);
-            let errorMessage = err.message || 'Đã xảy ra lỗi không mong muốn.';
             
-            if (errorMessage.includes('Quá thời gian chờ') || errorMessage.includes('Timeout')) {
-                errorMessage = "Hệ thống đang bận hoặc quá thời gian chờ. Vui lòng thử lại.";
-            } 
-            
-            onStateChange({ error: errorMessage });
+            // SIMPLIFIED ERROR DISPLAY
+            onStateChange({ error: err.message });
 
-            if (jobId) await jobService.updateJobStatus(jobId, 'failed', undefined, errorMessage);
+            if (jobId) await jobService.updateJobStatus(jobId, 'failed', undefined, err.message);
 
-            // Refund on error
+            // Refund on error if credits were deducted
             const { data: { user } } = await supabase.auth.getUser();
-            if (user) await refundCredits(user.id, cost, `Hoàn tiền: Lỗi khi tạo video (${errorMessage})`);
+            if (user && logId) await refundCredits(user.id, cost, `Hoàn tiền: Lỗi khi tạo video (${err.message})`);
 
         } finally {
             onStateChange({ isLoading: false });
@@ -246,48 +212,9 @@ const VideoGenerator: React.FC<VideoGeneratorProps> = ({ state, onStateChange, u
                             onChange={(e) => onStateChange({ prompt: e.target.value })}
                         />
                     </div>
-
-                    <div className="bg-main-bg/50 dark:bg-dark-bg/50 p-4 rounded-xl border border-border-color dark:border-gray-700">
-                        <label className="block text-sm font-medium text-text-secondary dark:text-gray-400 mb-3">2. Thêm gợi ý chuyển động (Tùy chọn)</label>
-                        <div className="flex items-center gap-2 bg-main-bg dark:bg-gray-800 p-1 rounded-lg mb-4">
-                            <button
-                                onClick={() => onStateChange({ mode: 'exterior' })}
-                                disabled={isLoading}
-                                className={`flex-1 py-2 px-4 rounded-md text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-main-bg dark:focus:ring-offset-gray-800 focus:ring-accent disabled:opacity-50 ${
-                                    mode === 'exterior' ? 'bg-purple-600 text-white shadow' : 'bg-transparent text-text-secondary dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
-                                }`}
-                            >
-                                Ngoại thất
-                            </button>
-                            <button
-                                onClick={() => onStateChange({ mode: 'interior' })}
-                                disabled={isLoading}
-                                className={`flex-1 py-2 px-4 rounded-md text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-main-bg dark:focus:ring-offset-gray-800 focus:ring-accent disabled:opacity-50 ${
-                                    mode === 'interior' ? 'bg-purple-600 text-white shadow' : 'bg-transparent text-text-secondary dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
-                                }`}
-                            >
-                                Nội thất
-                            </button>
-                        </div>
-                         <div className="relative">
-                            <select
-                                onChange={handleSuggestionSelect}
-                                disabled={isLoading}
-                                className="w-full bg-main-bg dark:bg-gray-800 border border-border-color dark:border-gray-700 rounded-lg p-3 text-text-primary dark:text-gray-200 focus:ring-2 focus:ring-accent focus:outline-none transition-all appearance-none pr-10"
-                                defaultValue=""
-                            >
-                                <option value="" disabled>Chọn một gợi ý chuyển động...</option>
-                                {(mode === 'exterior' ? exteriorSuggestions : interiorSuggestions).map((suggestion) => (
-                                    <option key={suggestion.label} value={suggestion.prompt}>
-                                        {suggestion.label}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-                    </div>
                     
                     <div>
-                        <label className="block text-sm font-medium text-text-secondary dark:text-gray-400 mb-2">3. Ảnh Bắt Đầu (Tùy chọn)</label>
+                        <label className="block text-sm font-medium text-text-secondary dark:text-gray-400 mb-2">2. Ảnh Bắt Đầu (Tùy chọn)</label>
                         <div className="max-w-md">
                              <ImageUpload onFileSelect={(file) => onStateChange({ startImage: file })} previewUrl={startImage?.objectURL}/>
                         </div>
