@@ -1,0 +1,7 @@
+{
+  "name": "Test CF Auflow",
+  "description": "An AI-powered application for generating and editing images and videos.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
